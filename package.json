@@ -15,6 +15,12 @@
         "build": "tsup",
         "test": "jest"
     },
+    "keywords": [
+        "unrealircd",
+        "services",
+        "irc",
+        "typescript"
+    ],
     "author": "craftxbox",
     "license": "MIT",
     "type": "module",
