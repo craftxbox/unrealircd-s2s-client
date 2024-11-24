@@ -220,6 +220,29 @@ export class ServerToServerClient {
      */
     onMessage: (source: string, target: string, message: string) => void = () => {};
     /**
+     * Event fired when a user sends a notice to a target
+     * @param source The source of the NOTICE packet
+     * @param target The target of the NOTICE packet
+     * @param message The message being sent
+     */
+    onNotice: (source: string, target: string, message: string) => void = () => {};
+    /**
+     * Event fired when any sourced command is received.
+     * Use this for any command not already implemented.
+     * @param source The source of the command
+     * @param command The command received
+     * @param args The arguments for the command
+     */
+    onCommand: (source: string, command: string, args: string[]) => void = () => {};
+    /**
+     * Event fired when a user requests the version of the server
+     * @param source The source of the VERSION packet
+     * @param args The arguments for the VERSION packet
+     */
+    onVersion: (source: string, args: string[]) => void = (source) => {
+        this.sendNumeric(source, 351, `Unreal S2S Client - https://github.com/craftxbox/unreal-s2s-client`);
+    };
+    /**
      * Event fired when the client is disconnected from the server
      * @param err The error that caused the disconnect, if any.
      */
@@ -713,6 +736,18 @@ export class ServerToServerClient {
                 let message = line.split(reconstruct() + " :")[1];
                 this.onMessage(source, target, message);
             }
+
+            if (command === "NOTICE") {
+                let target = consumePart();
+                let message = line.split(reconstruct() + " :")[1];
+                this.onNotice(source, target, message);
+            }
+
+            if (command === "VERSION") {
+                this.onVersion(source, parts.slice(partsConsumed));
+            }
+
+            this.onCommand(source, command, parts.slice(partsConsumed));
         }
     }
 
@@ -809,7 +844,23 @@ export class ServerToServerClient {
      * @param message The message to send
      */
     sendNotice(source: string, target: string, message: string) {
-        this.write(`NOTICE ${target} :${message}`);
+        this.writeRaw(`:${source} NOTICE ${target} :${message}`);
+    }
+
+    /**
+     * Send a numeric reply to a target
+     * @param target The target of the numeric
+     * @param numeric The numeric to send
+     * @param message The message to send
+     */
+    sendNumeric(target: string, numeric: string | number, message: string) {
+        numeric = typeof numeric === "number" ? numeric.toString() : numeric;
+        while (numeric.length < 3) {
+            numeric = "0" + numeric;
+        }
+        numeric = numeric.slice(0, 3);
+
+        this.write(`${numeric} ${target} ${message}`);
     }
 
     /**
