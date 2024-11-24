@@ -11,6 +11,10 @@
         "tsup": "^8.3.5",
         "typescript": "^4.4.4"
     },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/craftxbox/unreal-s2s-client.git"
+    },
     "scripts": {
         "build": "tsup",
         "test": "jest"
