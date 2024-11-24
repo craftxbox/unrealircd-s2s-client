@@ -15,6 +15,8 @@ type S2SClientOptions = {
     sid: string;
     hostname: string;
     authMethod: "pass" | "spkifp";
+    protocolExtensions?: string[];
+    serverDescription?: string;
     password?: string;
     keyPath?: string;
     certPath?: string;
@@ -38,7 +40,6 @@ export type User = {
     local?: boolean;
     away?: boolean;
     moddata?: { [key: string]: string };
-    swhois?: [string];
     memberships: { [channel: string]: Member };
 };
 
@@ -246,11 +247,14 @@ export class ServerToServerClient {
             } else if (this._options.authMethod === "spkifp") {
                 this.writeRaw(`PASS :*`);
             }
-            this.writeRaw("PROTOCTL NOQUIT NICKv2 SJOIN SJ3 NICKIP TKLEXT2 NEXTBANS CLK ESTSWHOIS MLOCK");
+
+            let protostring = (this._options.protocolExtensions || []).join(" ");
+
+            this.writeRaw(`PROTOCTL NOQUIT NICKv2 SJOIN SJ3 NICKIP TKLEXT2 NEXTBANS ${protostring}`);
             let unix_time = Math.floor(Date.now() / 1000);
             this.writeRaw(`PROTOCTL TS=${unix_time}`);
             this.writeRaw(`PROTOCTL EAUTH=${this._options.hostname} SID=${this._options.sid}`);
-            this.writeRaw(`SERVER ${this._options.hostname} 1 : Testing`);
+            this.writeRaw(`SERVER ${this._options.hostname} 1 : ${this._options.serverDescription || "craftxbox/unreal-s2s-client@gh"}`);
 
             this._socket.on("data", (data) => this._dataHandler(data));
             this._socket.on("end", () => {
