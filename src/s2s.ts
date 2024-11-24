@@ -240,7 +240,7 @@ export class ServerToServerClient {
      * @param args The arguments for the VERSION packet
      */
     onVersion: (source: string, args: string[]) => void = (source) => {
-        this.sendNumeric(source, 351, `Unreal S2S Client - https://github.com/craftxbox/unreal-s2s-client`);
+        this.sendNumeric(source, 351, `Unreal S2S Client - https://github.com/craftxbox/unrealircd-s2s-client`);
     };
     /**
      * Event fired when the client is disconnected from the server
@@ -277,7 +277,7 @@ export class ServerToServerClient {
             let unix_time = Math.floor(Date.now() / 1000);
             this.writeRaw(`PROTOCTL TS=${unix_time}`);
             this.writeRaw(`PROTOCTL EAUTH=${this._options.hostname} SID=${this._options.sid}`);
-            this.writeRaw(`SERVER ${this._options.hostname} 1 : ${this._options.serverDescription || "craftxbox/unreal-s2s-client@gh"}`);
+            this.writeRaw(`SERVER ${this._options.hostname} 1 : ${this._options.serverDescription || "craftxbox/unrealircd-s2s-client@gh"}`);
 
             this._socket.on("data", (data) => this._dataHandler(data));
             this._socket.on("end", () => {

@@ -1,4 +1,4 @@
-import { ServerToServerClient, User, generateUID } from "unreal-s2s-client";
+import { ServerToServerClient, User, generateUID } from "unrealircd-s2s-client";
 
 let sid = "999";
 
