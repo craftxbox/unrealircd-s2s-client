@@ -723,7 +723,7 @@ export class ServerToServerClient {
     writeRaw(raw: string) {
         if (!this._socket.writable) return;
         if (this.destroyed) return;
-        console.log("> " + raw);
+        if (process.env["S2S_WRITE_DEBUG"] === "true") console.log("> " + raw);
         this._socket.write(raw + "\r\n");
     }
 
