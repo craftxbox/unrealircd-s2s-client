@@ -24,7 +24,6 @@ type S2SClientOptions = {
 };
 
 export type User = {
-    source?: string;
     nickname: string;
     hopcount: number;
     timestamp: number;
@@ -75,18 +74,20 @@ export type Topic = {
 };
 
 export class ServerToServerClient {
-    _options: S2SClientOptions;
-    _tlsOptions: tls.ConnectionOptions;
-    _linkinfo: { [key: string]: string | boolean } = {};
-    _buffer = "";
-    _socket: tls.TLSSocket;
+    private _options: S2SClientOptions;
+    private _tlsOptions: tls.ConnectionOptions;
+    private _linkinfo: { [key: string]: string | boolean } = {};
+    private _buffer = "";
+    private _writebuffer: string[] = [];
+    private _socket: tls.TLSSocket;
+    private _blockEOS: boolean;
 
     /**
      * The users on the network, indexed by UID
      */
     users: { [uid: string]: User } = {};
-    /** Map of nicknames to UID's */
-    usersByNick: { [nickname: string]: string } = {};
+    /** Like this.users but by Nickname instead of UID*/
+    usersByNick: { [nickname: string]: User } = {};
     /** Servers on the network */
     servers: { [sid: string]: Server } = {};
     /** Channels on the network */
@@ -96,12 +97,17 @@ export class ServerToServerClient {
 
     /**
      * Event fired when the client is first registered with the network
+     * @returns true if the client should not automatically send end of sync. You MUST call endOfSync() manually.
      */
-    onRegistered: () => void = () => {};
+    onRegistered: () => boolean | void = () => {};
     /**
      * Event fired when the client is fully synced with the network
      */
     onSync: () => void = () => {};
+    /**
+     * Event fired when a server is fully synced with the network
+     */
+    onServerSynced: (source: string) => void = () => {};
     /**
      * Event fired for every packet, containing the raw line from the server
      * @param raw The raw line from the server
@@ -114,9 +120,10 @@ export class ServerToServerClient {
     onPing: (source: string) => void = () => {};
     /**
      * Event fired when the server sends UID to register a user.
+     * @param source The source of the UID packet
      * @param user The user object.
      */
-    onUID: (user: User) => void = () => {};
+    onUID: (source: string, user: User) => void = () => {};
     /**
      * Event fired when the server sends SID to register a server.
      * @param server The server object.
@@ -277,7 +284,9 @@ export class ServerToServerClient {
             let unix_time = Math.floor(Date.now() / 1000);
             this.writeRaw(`PROTOCTL TS=${unix_time}`);
             this.writeRaw(`PROTOCTL EAUTH=${this._options.hostname} SID=${this._options.sid}`);
-            this.writeRaw(`SERVER ${this._options.hostname} 1 : ${this._options.serverDescription || "craftxbox/unrealircd-s2s-client@gh"}`);
+            this.writeRaw(
+                `SERVER ${this._options.hostname} 1 : ${this._options.serverDescription || "craftxbox/unrealircd-s2s-client@gh"}`
+            );
 
             this._socket.on("data", (data) => this._dataHandler(data));
             this._socket.on("end", () => {
@@ -287,6 +296,8 @@ export class ServerToServerClient {
             this._socket.on("error", (err) => {
                 this.onDisconnected(err);
             });
+
+            this._startWriter();
         });
     }
 
@@ -328,7 +339,7 @@ export class ServerToServerClient {
         }
 
         if (parts[0] === "PING") {
-            this.writeRaw(`PONG ${parts[1]}`);
+            this._writebuffer.unshift(`PONG ${parts[1]}`);
             this.onPing(parts[1]);
         }
 
@@ -350,21 +361,39 @@ export class ServerToServerClient {
             this.onTopic(topic);
         }
 
+        if (parts[0] === "NETINFO") {
+            consumePart();
+            let maxusers = consumePart();
+            let timestamp = consumePart();
+            let version = consumePart();
+            let cloakhash = consumePart();
+            [consumePart(), consumePart(), consumePart()]; // Skip the rest of the line
+            let networkname = line.split(reconstruct() + " :")[1];
+            this._linkinfo["MAXUSERS"] = maxusers;
+            this._linkinfo["TIMESTAMP"] = timestamp;
+            this._linkinfo["VERSION"] = version;
+            this._linkinfo["CLOAKHASH"] = cloakhash;
+            this._linkinfo["NETWORKNAME"] = networkname;
+            if (!this._blockEOS) {
+                this.endOfSync();
+            }
+            this.onSync();
+        }
+
+        if (parts[0] === "SERVER") {
+            this._blockEOS = this.onRegistered() == true;
+        }
+
         if (parts[0].startsWith(":")) {
             let source = consumePart().slice(1);
             let command = consumePart();
 
             if (command === "EOS") {
-                if (source === this._linkinfo["SID"]) {
-                    this.onRegistered();
-                    this.write("EOS");
-                    this.onSync();
-                }
+                this.onServerSynced(source);
             }
 
             if (command === "UID") {
                 let user: User = {
-                    source: source,
                     nickname: parts[2],
                     hopcount: parseInt(parts[3]),
                     timestamp: parseInt(parts[4]),
@@ -380,8 +409,8 @@ export class ServerToServerClient {
                     memberships: {},
                 };
                 this.users[user.uid] = user;
-                this.usersByNick[user.nickname] = user.uid;
-                this.onUID(user);
+                this.usersByNick[user.nickname] = user;
+                this.onUID(source, user);
             }
 
             if (command === "SID") {
@@ -399,7 +428,7 @@ export class ServerToServerClient {
             if (command === "NICK") {
                 delete this.usersByNick[this.users[source].nickname];
                 this.users[source].nickname = parts[2];
-                this.usersByNick[parts[2]] = source;
+                this.usersByNick[parts[2]] = this.users[source];
                 this.onNick(source, parts[2], parseInt(parts[3]));
             }
 
@@ -584,6 +613,9 @@ export class ServerToServerClient {
                 let channel = consumePart();
 
                 let user = this.users[target];
+
+                if (!user.local) return;
+
                 let membership = {
                     uid: user.uid,
                     prefix: this.channels[channel] ? "" : "@",
@@ -704,7 +736,7 @@ export class ServerToServerClient {
             }
 
             if (command === "UMODE2") {
-                let user = this.users[source] || this.users[this.usersByNick[source]];
+                let user = this.users[source] || this.usersByNick[source];
                 let modes = consumePart();
 
                 let newModes: { [mode: string]: boolean } = {};
@@ -755,18 +787,15 @@ export class ServerToServerClient {
      * Write a raw line to the server
      * @param raw The raw line to write
      */
-    writeRaw(raw: string) {
-        if (!this._socket.writable) return;
-        if (this.destroyed) return;
-        if (process.env["S2S_WRITE_DEBUG"] === "true") console.log("> " + raw);
-        this._socket.write(raw + "\r\n");
+    writeRaw(raw: string): void {
+        this._writebuffer.push(raw + "\r\n");
     }
 
     /**
      * Write a message to the server, prepending the SID
      * @param message The message to write
      */
-    write(message: string) {
+    write(message: string): void {
         let data = `:${this._options.sid} ${message}`;
         this.writeRaw(data);
     }
@@ -774,8 +803,9 @@ export class ServerToServerClient {
     /**
      * Introduce a user to the network
      * @param user The user to introduce
+     * @param noSJoin If true, do not send SJOIN packets for the user. Take care to manually send SJOIN packets for the user, or you will be desynced.
      */
-    registerUser(user: User) {
+    registerUser(user: User, noSJoin?: boolean): void {
         let message = ["UID"];
         message.push(user.nickname);
         message.push(user.hopcount.toString());
@@ -792,7 +822,9 @@ export class ServerToServerClient {
         this.write(message.join(" "));
 
         this.users[user.uid] = user;
-        this.usersByNick[user.nickname] = user.uid;
+        this.usersByNick[user.nickname] = user;
+
+        if (noSJoin) return;
 
         for (let name in user.memberships) {
             let membership = user.memberships[name];
@@ -818,7 +850,7 @@ export class ServerToServerClient {
      * Introduce a server to the network
      * @param server The server to introduce
      */
-    registerServer(server: Server) {
+    registerServer(server: Server): void {
         let message = ["SID"];
         message.push(server.servername);
         message.push(server.hopcount.toString());
@@ -833,7 +865,7 @@ export class ServerToServerClient {
      * @param target The target of the message
      * @param message The message to send
      */
-    sendMessage(source: string, target: string, message: string) {
+    sendMessage(source: string, target: string, message: string): void {
         this.writeRaw(`:${source} PRIVMSG ${target} :${message}`);
     }
 
@@ -843,7 +875,7 @@ export class ServerToServerClient {
      * @param target The target of the notice
      * @param message The message to send
      */
-    sendNotice(source: string, target: string, message: string) {
+    sendNotice(source: string, target: string, message: string): void {
         this.writeRaw(`:${source} NOTICE ${target} :${message}`);
     }
 
@@ -853,7 +885,7 @@ export class ServerToServerClient {
      * @param numeric The numeric to send
      * @param message The message to send
      */
-    sendNumeric(target: string, numeric: string | number, message: string) {
+    sendNumeric(target: string, numeric: string | number, message: string): void {
         numeric = typeof numeric === "number" ? numeric.toString() : numeric;
         while (numeric.length < 3) {
             numeric = "0" + numeric;
@@ -861,6 +893,38 @@ export class ServerToServerClient {
         numeric = numeric.slice(0, 3);
 
         this.write(`${numeric} ${target} ${message}`);
+    }
+
+    /**
+     * Join users to a channel
+     * @param channel The channel to join the users to
+     * @param members The members to join to the channel
+     */
+    sjoinToChannel(channel: Channel, ...members: Member[]): void {
+        if (!this.channels[channel.name]) {
+            this.channels[channel.name] = channel;
+        }
+
+        let buffer = "SJOIN " + timestamp();
+        buffer += " " + channel.name;
+        buffer += " " + channel.modes;
+        buffer += " :";
+
+        members.forEach((member) => {
+            if (!this.users[member.uid]) {
+                throw new Error(`User ${member.uid} not registered`);
+            }
+
+            if (this.users[member.uid].memberships[channel.name]) {
+                throw new Error(`User ${member.uid} is already in channel ${channel.name}`);
+            }
+
+            buffer += member.prefix + member.uid + " ";
+            channel.users[member.uid] = member;
+            this.users[member.uid].memberships[channel.name] = member;
+        });
+
+        this.write(buffer);
     }
 
     /**
@@ -885,12 +949,33 @@ export class ServerToServerClient {
         };
     }
 
+    endOfSync(): void {
+        this.write("EOS");
+        this.writeRaw(`NETINFO 0 ${timestamp()} 6100 * 0 0 0 :${this._linkinfo["NETWORKNAME"] || ""}`);
+    }
+
+    async _startWriter(): Promise<void> {
+        while (true) {
+            if (this._writebuffer.length > 0) {
+                let data = this._writebuffer.splice(0, 64).join("");
+                if (process.env["S2S_WRITE_DEBUG"] === "true") console.log("> " + data);
+                this._socket.write(data);
+            }
+            if (this._writebuffer.length > 0) {
+                // We only want to slow down if there's more data to write. 
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            } else {
+                await new Promise((resolve) => setTimeout(resolve,1));
+            }
+        }
+    }
+
     /**
      * Disconnect from the server
      * Does not send QUIT packets
      * @param reason The reason for the disconnect
      */
-    disconnect(reason = "Software Requested Disconnect", graceful?: boolean) {
+    disconnect(reason = "Software Requested Disconnect", graceful?: boolean): void {
         if (graceful) {
             Object.keys(this.users)
                 .filter((uid) => uid.startsWith(this._options.sid))
@@ -911,6 +996,10 @@ export class ServerToServerClient {
  */
 export function generateUID(sid: string): string {
     return sid + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+export function timestamp() {
+    return Math.floor(Date.now() / 1000);
 }
 
 export default ServerToServerClient;
