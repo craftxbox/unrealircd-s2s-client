@@ -42,18 +42,17 @@ client.onSync = () => {
 let approvedFingerprints: string[] = [];
 
 client.onMessage = (from, to, message) => {
-    let source = client.users[from] || client.users[client.usersByNick[from]];
+    let source = client.users[from] || client.usersByNick[from];
     if (!source) {
         source = client.serverToUser(client.servers[from]);
     }
     if (to === "#services") {
         if (message.startsWith("approve")) {
             let [_, nickname] = message.split(" ");
-            let userUid = client.usersByNick[nickname];
-            let user = userUid ? client.users[userUid] : null;
-            if (!user && userUid.length > 40) {
-                approvedFingerprints.push(userUid);
-                client.sendMessage(AuthServ.uid, source.uid, `Fingerprint ${userUid} approved.`);
+            let user = client.usersByNick[nickname];
+            if (!user && nickname.length > 40) {
+                approvedFingerprints.push(nickname);
+                client.sendMessage(AuthServ.uid, source.uid, `Fingerprint ${nickname} approved.`);
                 return;
             } else if (!user) {
                 client.sendMessage(AuthServ.uid, source.uid, `User ${nickname} not found or invalid CertFP.`);
