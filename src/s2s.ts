@@ -290,7 +290,6 @@ export class ServerToServerClient {
 
             this._socket.on("data", (data) => this._dataHandler(data));
             this._socket.on("end", () => {
-                console.log("Disconnected from server.");
                 this.onDisconnected();
             });
             this._socket.on("error", (err) => {
@@ -368,7 +367,7 @@ export class ServerToServerClient {
             let version = consumePart();
             let cloakhash = consumePart();
             [consumePart(), consumePart(), consumePart()]; // Skip the rest of the line
-            let networkname = line.split(reconstruct() + " :")[1];
+            let networkname = line.slice(reconstruct().length + 2);
             this._linkinfo["MAXUSERS"] = maxusers;
             this._linkinfo["TIMESTAMP"] = timestamp;
             this._linkinfo["VERSION"] = version;
@@ -394,18 +393,18 @@ export class ServerToServerClient {
 
             if (command === "UID") {
                 let user: User = {
-                    nickname: parts[2],
-                    hopcount: parseInt(parts[3]),
-                    timestamp: parseInt(parts[4]),
-                    username: parts[5],
-                    hostname: parts[6],
-                    uid: parts[7],
-                    servicestamp: parts[8],
-                    usermodes: parts[9],
-                    virtualhost: parts[10],
-                    cloakedhost: parts[11],
-                    ip: parts[12],
-                    gecos: line.split(parts[12] + " :")[1],
+                    nickname: consumePart(),
+                    hopcount: parseInt(consumePart()),
+                    timestamp: parseInt(consumePart()),
+                    username: consumePart(),
+                    hostname: consumePart(),
+                    uid: consumePart(),
+                    servicestamp: consumePart(),
+                    usermodes: consumePart(),
+                    virtualhost: consumePart(),
+                    cloakedhost: consumePart(),
+                    ip: consumePart(),
+                    gecos: line.slice(reconstruct().length + 2),
                     memberships: {},
                 };
                 this.users[user.uid] = user;
@@ -416,10 +415,10 @@ export class ServerToServerClient {
             if (command === "SID") {
                 let server = {
                     source: source,
-                    servername: parts[2],
-                    hopcount: parseInt(parts[3]),
-                    sid: parts[4],
-                    info: line.split(parts[4] + " :")[1],
+                    servername: consumePart(),
+                    hopcount: parseInt(consumePart()),
+                    sid: consumePart(),
+                    info: line.slice(reconstruct().length + 2),
                 };
                 this.servers[server.sid] = server;
                 this.onSID(server);
@@ -435,12 +434,12 @@ export class ServerToServerClient {
             if (command === "QUIT") {
                 delete this.usersByNick[this.users[source].nickname];
                 delete this.users[source];
-                let quitMessage = line.split("QUIT :")[1];
+                let quitMessage = line.slice(reconstruct().length + 2);
                 this.onQuit(source, quitMessage);
             }
 
             if (command === "KILL") {
-                let killMessage = line.split(" :")[1];
+                let killMessage = line.slice(reconstruct().length + 2);
                 this.onKill(source, parts[2], killMessage);
             }
 
@@ -587,7 +586,7 @@ export class ServerToServerClient {
                     delete this.channels[channel];
                 }
 
-                let reason = line.split(reconstruct() + " :")[1];
+                let reason = line.slice(reconstruct().length + 2);
 
                 this.onPart(source, channel, reason);
             }
@@ -603,7 +602,7 @@ export class ServerToServerClient {
                     delete this.channels[channel];
                 }
 
-                let reason = line.split(reconstruct() + " :")[1];
+                let reason = line.slice(reconstruct().length + 2);
 
                 this.onKick(source, channel, target, reason);
             }
@@ -649,7 +648,7 @@ export class ServerToServerClient {
                     delete this.channels[channel];
                 }
 
-                let reason = line.split(reconstruct() + " :")[1];
+                let reason = line.slice(reconstruct().length + 2);
                 reason = reason ? "SAPart:" + reason : "";
 
                 this.writeRaw(`:${target} PART ${channel} :${reason}`);
@@ -765,13 +764,13 @@ export class ServerToServerClient {
 
             if (command === "PRIVMSG") {
                 let target = consumePart();
-                let message = line.split(reconstruct() + " :")[1];
+                let message = line.slice(reconstruct().length + 2);
                 this.onMessage(source, target, message);
             }
 
             if (command === "NOTICE") {
                 let target = consumePart();
-                let message = line.split(reconstruct() + " :")[1];
+                let message = line.slice(reconstruct().length + 2);
                 this.onNotice(source, target, message);
             }
 
