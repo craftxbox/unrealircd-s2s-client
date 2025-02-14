@@ -60,7 +60,7 @@ export type Channel = {
     name: string;
     timestamp: number;
     modes: string;
-    users: { [uid: string]: Member };
+    users: { [member: string]: Member };
     bans: string[];
     excepts: string[];
     inviteExcepts: string[];
@@ -919,7 +919,7 @@ export class ServerToServerClient {
             }
 
             buffer += member.prefix + member.uid + " ";
-            channel.users[member.uid] = member;
+            channel.users[this.users[member.uid].nickname] = member;
             this.users[member.uid].memberships[channel.name] = member;
         });
 
